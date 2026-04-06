@@ -272,27 +272,84 @@ class FormulaWidget(FigureCanvas):
             r"$b_n=\frac{1}{L}\int_{-L}^{L}f(x)\sin\frac{n\pi}{L}x\,dx$", **kw)
         self.draw()
 
+    @staticmethod
+    def _coeff_latex(val):
+        """Try to express a coefficient as a nice fraction with π.
+        e.g. 1.2732… → 4/π,   0.4244… → 4/3π,   0.8105… → 8/π²
+        Falls back to 4-decimal if no nice form found."""
+        if abs(val) < 1e-8:
+            return None
+
+        sign = "-" if val < 0 else ""
+        av   = abs(val)
+
+        # ── try val = p / (q·π) ──────────────────────────────
+        vpi = av * np.pi
+        for q in range(1, 25):
+            p = round(vpi * q)
+            if p != 0 and abs(vpi * q - p) < 5e-4:
+                if q == 1:
+                    num = str(p) if p != 1 else ""
+                    return fr"{sign}\frac{{{num or '1'}}}{{\pi}}"
+                else:
+                    return fr"{sign}\frac{{{p}}}{{{q}\pi}}"
+
+        # ── try val = p / (q·π²) ────────────────────────────
+        vpi2 = av * np.pi ** 2
+        for q in range(1, 25):
+            p = round(vpi2 * q)
+            if p != 0 and abs(vpi2 * q - p) < 5e-3:
+                if q == 1:
+                    return fr"{sign}\frac{{{p}}}{{\pi^2}}"
+                else:
+                    return fr"{sign}\frac{{{p}}}{{{q}\pi^2}}"
+
+        # ── try val = p·π / q ────────────────────────────────
+        vdpi = av / np.pi
+        for q in range(1, 25):
+            p = round(vdpi * q)
+            if p != 0 and abs(vdpi * q - p) < 5e-4:
+                pstr = str(p) if p != 1 else ""
+                if q == 1:
+                    return fr"{sign}{pstr}\pi"
+                else:
+                    return fr"{sign}\frac{{{pstr}\pi}}{{{q}}}"
+
+        # ── fallback: decimal ────────────────────────────────
+        return f"{sign}{av:.4f}"
+
     def show_series(self, a0, an, bn, L, nshow=4):
         self._reset()
         terms = []
+
+        # DC term  a₀
         if abs(a0) > 1e-5:
-            terms.append(f"{a0:.4f}")
+            c = self._coeff_latex(a0)
+            if c is not None:
+                terms.append(c)
+
         for i in range(1, min(nshow + 1, len(an) + 1)):
             a, b = an[i - 1], bn[i - 1]
+            arg = fr"\frac{{{i}\pi x}}{{{L:.3g}}}"
+
             if abs(a) > 1e-5:
-                s = "+" if a > 0 and terms else ("-" if a < 0 else "")
-                terms.append(
-                    fr"{s}{abs(a):.4f}\cos\!\left(\frac{{{i}\pi x}}{{{L:.3g}}}\right)")
+                c = self._coeff_latex(a)
+                plus = "+" if (not c.startswith("-")) and terms else ""
+                terms.append(fr"{plus}{c}\cos\!\left({arg}\right)")
+
             if abs(b) > 1e-5:
-                s = "+" if b > 0 and terms else ("-" if b < 0 else "")
-                terms.append(
-                    fr"{s}{abs(b):.4f}\sin\!\left(\frac{{{i}\pi x}}{{{L:.3g}}}\right)")
+                c = self._coeff_latex(b)
+                plus = "+" if (not c.startswith("-")) and terms else ""
+                terms.append(fr"{plus}{c}\sin\!\left({arg}\right)")
+
         if terms:
-            tex = r"$f(x)\approx " + r"\;".join(terms[:6]) + r"\;\cdots$"
+            body = r"\;".join(terms[:6])
+            tex = r"$f(x)\approx " + body + r"\;\cdots$"
         else:
             tex = r"$f(x)=0$"
+
         try:
-            self.ax.text(0.50, 0.50, tex, fontsize=12, color=TEXT,
+            self.ax.text(0.50, 0.50, tex, fontsize=11, color=TEXT,
                          va="center", ha="center")
         except Exception:
             self.ax.text(0.50, 0.50, " ".join(terms[:6]),
