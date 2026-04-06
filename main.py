@@ -413,10 +413,10 @@ class FourierLab(QMainWindow):
     def _build_sidebar(self, root):
         sb = QFrame(); sb.setObjectName("sidebar"); sb.setFixedWidth(200)
         sl = QVBoxLayout(sb); sl.setContentsMargins(10, 16, 10, 12); sl.setSpacing(2)
-        t = QLabel("∿  Fourier Series")
+        t = QLabel("∿  Fourier Series Analysis")
         t.setStyleSheet(f"font-size:17px;font-weight:bold;color:{ACCENT};padding:6px 2px;")
         sl.addWidget(t)
-        sl.addWidget(QLabel("Analysis Tool  ·  Bnar Haje"))
+        sl.addWidget(QLabel("Analysis Tool  ·  Bnar Haje \n 2025-2026"))
         sl.addSpacing(12)
         self.nav = {}
         for key, txt, i in [("series","∿  Fourier Series",0),
