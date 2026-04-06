@@ -588,40 +588,62 @@ class FourierLab(QMainWindow):
         # ── BOTTOM: nth harmonic component being added ────────────────────
         ax2 = self.s_ax2; ax2.clear(); init_ax(ax2)
         ax2.grid(True, alpha=0.3, color=GRID, lw=0.4)
+
+        # Fixed reference scale = max amplitude across ALL harmonics
+        # → each harmonic is shown at its TRUE relative size
+        all_amps = np.sqrt(self._an**2 + self._bn**2)
+        ref_ylim = float(max(np.max(all_amps) * 1.35, 0.15))
+
         if n >= 1 and n <= len(self._an):
             a_n, b_n = self._an[n-1], self._bn[n-1]
             nth = a_n * np.cos(n * np.pi * x / L) + b_n * np.sin(n * np.pi * x / L)
-            amp = np.sqrt(a_n**2 + b_n**2)
+            amp = float(np.sqrt(a_n**2 + b_n**2))
             COLS = [PURPLE, TEAL, PINK, ORANGE, GREEN, ACCENT]
             col  = COLS[(n - 1) % len(COLS)]
 
             if amp > 1e-6:
-                # ── non-zero harmonic: plot with CORRECT y-scale ─────────
-                ax2.plot(x, nth, color=col, lw=2.2,
-                         label=f"aₙ={a_n:.4f}   bₙ={b_n:.4f}   |C|={amp:.4f}")
+                # formula with ACTUAL numbers filled in
+                # e.g.  0.4244·cos(3·π·x / 2) + 0.0000·sin(3·π·x / 2)
+                parts = []
+                if abs(a_n) > 1e-6:
+                    parts.append(f"{a_n:.4f}·cos({n}·π·x/{L:.3g})")
+                if abs(b_n) > 1e-6:
+                    sign = "+" if b_n > 0 and parts else ""
+                    parts.append(f"{sign}{b_n:.4f}·sin({n}·π·x/{L:.3g})")
+                formula_str = "  ".join(parts) if parts else "0"
+
+                ax2.plot(x, nth, color=col, lw=2.4,
+                         label=f"h{n}(x) = {formula_str}")
                 ax2.fill_between(x, nth, alpha=0.15, color=col)
-                ylim = float(max(amp, 0.05)) * 1.45
-                ax2.set_ylim(-ylim, ylim)          # ← THE FIX: explicit y-limits
+
+                # dotted lines showing the TRUE amplitude level
+                ax2.axhline( amp, color=col, lw=0.9, ls=":", alpha=0.55)
+                ax2.axhline(-amp, color=col, lw=0.9, ls=":", alpha=0.55)
+                ax2.annotate(f"|C{n}| = {amp:.4f}",
+                             xy=(xmax, amp), xycoords="data",
+                             fontsize=8, color=col, va="bottom", ha="right")
             else:
-                # ── zero harmonic (e.g. even terms of Square wave) ───────
                 ax2.plot(x, nth, color=MUTED, lw=1.5, ls="--",
-                         label="zero coefficient — does not contribute")
-                ax2.set_ylim(-0.35, 0.35)
-                ax2.text(0.50, 0.58, f"h{n}(x) = 0",
+                         label=f"h{n}(x) = 0  (zero coefficient)")
+                ax2.text(0.50, 0.56, f"h{n}(x) = 0",
                          transform=ax2.transAxes, fontsize=14,
                          color=MUTED, ha="center", va="center", fontweight="bold")
-                ax2.text(0.50, 0.38,
-                         "This harmonic has zero coefficient\nfor the selected waveform.",
+                ax2.text(0.50, 0.36,
+                         "Zero coefficient — this harmonic\ndoes not exist in this waveform.",
                          transform=ax2.transAxes, fontsize=9,
                          color=MUTED, ha="center", va="center", style="italic")
 
             ax2.axhline(0, color=GRID, lw=0.6)
 
+        # FIXED y-scale so harmonics are shown at true relative sizes
+        ax2.set_ylim(-ref_ylim, ref_ylim)
         ax2.set_xlim(xmin, xmax)
-        ax2.set_xlabel("x"); ax2.set_ylabel(f"h{n}(x)", fontsize=9)
+        ax2.set_xlabel("x")
+        ax2.set_ylabel("amplitude", fontsize=9)
         ax2.set_title(
-            f"Harmonic  n = {n}   →   "
-            f"aₙ cos(n π x / L) + bₙ sin(n π x / L)",
+            f"  n = {n}  |  aₙ = {float(self._an[n-1]):.5f}   "
+            f"bₙ = {float(self._bn[n-1]):.5f}   "
+            f"|Cₙ| = {float(all_amps[n-1]):.5f}",
             color=TEAL, fontsize=9, fontweight="bold")
         ax2.legend(facecolor=PLOT_BG, edgecolor=GRID, labelcolor=TEXT,
                    fontsize=8, loc="upper right")
