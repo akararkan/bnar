@@ -349,10 +349,10 @@ class FourierLab(QMainWindow):
     def _build_sidebar(self, root):
         sb = QFrame(); sb.setObjectName("sidebar"); sb.setFixedWidth(200)
         sl = QVBoxLayout(sb); sl.setContentsMargins(10, 16, 10, 12); sl.setSpacing(2)
-        t = QLabel("∿  FourierLab")
+        t = QLabel("∿  Fourier Series")
         t.setStyleSheet(f"font-size:17px;font-weight:bold;color:{ACCENT};padding:6px 2px;")
         sl.addWidget(t)
-        sl.addWidget(QLabel("Engineering Analysis 2025-26"))
+        sl.addWidget(QLabel("Analysis Tool  ·  Bnar Haje"))
         sl.addSpacing(12)
         self.nav = {}
         for key, txt, i in [("series","∿  Fourier Series",0),
@@ -594,14 +594,35 @@ class FourierLab(QMainWindow):
             amp = np.sqrt(a_n**2 + b_n**2)
             COLS = [PURPLE, TEAL, PINK, ORANGE, GREEN, ACCENT]
             col  = COLS[(n - 1) % len(COLS)]
-            ax2.plot(x, nth, color=col, lw=2.0,
-                     label=f"h{n}(x)   a{n}={a_n:.4f}   b{n}={b_n:.4f}   |C|={amp:.4f}")
-            ax2.fill_between(x, nth, alpha=0.12, color=col)
-            ax2.axhline(0, color=GRID, lw=0.5)
+
+            if amp > 1e-6:
+                # ── non-zero harmonic: plot with CORRECT y-scale ─────────
+                ax2.plot(x, nth, color=col, lw=2.2,
+                         label=f"aₙ={a_n:.4f}   bₙ={b_n:.4f}   |C|={amp:.4f}")
+                ax2.fill_between(x, nth, alpha=0.15, color=col)
+                ylim = float(max(amp, 0.05)) * 1.45
+                ax2.set_ylim(-ylim, ylim)          # ← THE FIX: explicit y-limits
+            else:
+                # ── zero harmonic (e.g. even terms of Square wave) ───────
+                ax2.plot(x, nth, color=MUTED, lw=1.5, ls="--",
+                         label="zero coefficient — does not contribute")
+                ax2.set_ylim(-0.35, 0.35)
+                ax2.text(0.50, 0.58, f"h{n}(x) = 0",
+                         transform=ax2.transAxes, fontsize=14,
+                         color=MUTED, ha="center", va="center", fontweight="bold")
+                ax2.text(0.50, 0.38,
+                         "This harmonic has zero coefficient\nfor the selected waveform.",
+                         transform=ax2.transAxes, fontsize=9,
+                         color=MUTED, ha="center", va="center", style="italic")
+
+            ax2.axhline(0, color=GRID, lw=0.6)
+
         ax2.set_xlim(xmin, xmax)
         ax2.set_xlabel("x"); ax2.set_ylabel(f"h{n}(x)", fontsize=9)
-        ax2.set_title(f"Harmonic  n = {n}  →  being added to the sum",
-                      color=TEAL, fontsize=9, fontweight="bold")
+        ax2.set_title(
+            f"Harmonic  n = {n}   →   "
+            f"aₙ cos(n π x / L) + bₙ sin(n π x / L)",
+            color=TEAL, fontsize=9, fontweight="bold")
         ax2.legend(facecolor=PLOT_BG, edgecolor=GRID, labelcolor=TEXT,
                    fontsize=8, loc="upper right")
 
