@@ -28,6 +28,7 @@ matplotlib.use("QtAgg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from matplotlib.gridspec import GridSpec
 
 # ═══════════════════════════════════════════════════════
 #  DARK PALETTE
@@ -153,6 +154,10 @@ QPushButton#spectrum_btn {{
     background: {BG_BTN}; border: 1px solid {BORDER}; color: {TEAL};
 }}
 QPushButton#spectrum_btn:hover {{ border-color: {TEAL}; background: #1a2a3a; }}
+QPushButton#pause_btn {{
+    background: #2a1a3a; border: 1px solid #6633aa; color: {PURPLE};
+}}
+QPushButton#pause_btn:hover {{ background: #3a2050; border-color: {PURPLE}; }}
 QLineEdit {{
     background: {BG_INPUT}; color: {TEXT}; border: 1px solid {BORDER};
     border-radius: 3px; padding: 4px 6px; selection-background-color: {ACCENT};
@@ -225,6 +230,9 @@ def _ab(t):
 
 def _sb(t):
     b = QPushButton(t); b.setObjectName("spectrum_btn"); b.setCursor(Qt.PointingHandCursor); return b
+
+def _pab(t):
+    b = QPushButton(t); b.setObjectName("pause_btn"); b.setCursor(Qt.PointingHandCursor); return b
 
 def _nb(t):
     b = QPushButton(t); b.setObjectName("nav_btn"); b.setCheckable(True)
@@ -304,31 +312,40 @@ class FourierLab(QMainWindow):
         self._build_sidebar(root)
         self.stack = QStackedWidget(); root.addWidget(self.stack, 1)
 
-        # coefficient cache
+        # ── coefficient cache ────────────────────────────────────────────
         self._cache_key = self._cache_T = None
         self._a0 = self._an = self._bn = None
 
-        # ═══════════════════════════════════════
-        #  ANIMATION STATE
-        #  _anim_cur:    harmonic currently shown
-        #  _anim_target: harmonic we're animating toward
-        #  _anim_paused: True when user paused mid-animation
-        # ═══════════════════════════════════════
+        # ── Fourier Series animation ─────────────────────────────────────
         self._anim_cur    = 0
         self._anim_target = 0
         self._anim_paused = False
         self._anim_timer  = QTimer()
         self._anim_timer.timeout.connect(self._anim_step)
 
+        # ── Spectrum animation ───────────────────────────────────────────
+        self._sp_timer       = QTimer()
+        self._sp_timer.timeout.connect(self._sp_anim_step)
+        self._sp_anim_cur    = 0
+        self._sp_anim_paused = False
+        self._sp_data        = None
+
+        # ── FFT animation ────────────────────────────────────────────────
+        self._fft_timer       = QTimer()
+        self._fft_timer.timeout.connect(self._fft_anim_step)
+        self._fft_phase       = 0    # 0=time sweep  1=freq grow
+        self._fft_anim_cur    = 0
+        self._fft_anim_paused = False
+        self._fft_data        = None
+
         self._build_series_page()
         self._build_spectrum_page()
         self._build_fft_page()
 
         self._set_nav("series"); self.stack.setCurrentIndex(0)
-        # animate on startup
         QTimer.singleShot(150, self._start_animation)
 
-    # ─────────── sidebar ───────────
+    # ─────────────────────── sidebar ────────────────────────────────────
     def _build_sidebar(self, root):
         sb = QFrame(); sb.setObjectName("sidebar"); sb.setFixedWidth(200)
         sl = QVBoxLayout(sb); sl.setContentsMargins(10, 16, 10, 12); sl.setSpacing(2)
@@ -351,32 +368,40 @@ class FourierLab(QMainWindow):
         root.addWidget(sb)
 
     def _go(self, k, i):
-        self._stop_animation(); self._set_nav(k); self.stack.setCurrentIndex(i)
+        self._stop_all_animations()
+        self._set_nav(k); self.stack.setCurrentIndex(i)
 
     def _set_nav(self, k):
         for n, b in self.nav.items(): b.setChecked(n == k)
 
-    # ═══════════════════════════════════════════
-    #  PAGE 1 — FOURIER SERIES
-    # ═══════════════════════════════════════════
+    def _stop_all_animations(self):
+        self._anim_timer.stop();  self._anim_paused  = False
+        self._sp_timer.stop();    self._sp_anim_paused = False
+        self._fft_timer.stop();   self._fft_anim_paused = False
+
+    # ═══════════════════════════════════════════════════════════════════
+    #  PAGE 1 — FOURIER SERIES  (dual panel)
+    # ═══════════════════════════════════════════════════════════════════
     def _build_series_page(self):
         page = QWidget()
         vl = QVBoxLayout(page); vl.setContentsMargins(10, 8, 10, 6); vl.setSpacing(6)
 
-        # ── PLOT ──
+        # ── DUAL-PANEL PLOT ──────────────────────────────────────────────
         pf = QFrame(); pf.setObjectName("plot_frame")
         pfl = QVBoxLayout(pf); pfl.setContentsMargins(2, 2, 2, 2)
-        self.s_fig = Figure(figsize=(9, 4), dpi=100, facecolor=PLOT_BG)
-        self.s_ax = self.s_fig.add_subplot(111); init_ax(self.s_ax)
+        self.s_fig = Figure(figsize=(9, 5), dpi=100, facecolor=PLOT_BG)
+        gs = GridSpec(3, 1, figure=self.s_fig, hspace=0.55)
+        self.s_ax  = self.s_fig.add_subplot(gs[:2, 0])   # reconstruction (top 2/3)
+        self.s_ax2 = self.s_fig.add_subplot(gs[2, 0])    # nth harmonic  (bottom 1/3)
+        init_ax(self.s_ax); init_ax(self.s_ax2)
         self.s_canvas = _cv(self.s_fig, pfl)
         vl.addWidget(pf, 5)
 
-        # ── CONTROLS + FORMULAS ──
+        # ── CONTROLS + FORMULA PANEL ─────────────────────────────────────
         bot = QHBoxLayout(); bot.setSpacing(10)
         ctrl = QWidget()
         cl = QVBoxLayout(ctrl); cl.setContentsMargins(0, 0, 0, 0); cl.setSpacing(5)
 
-        # Row 1:  [Plot 1]  n  T  x Periods
         r1 = QHBoxLayout(); r1.setSpacing(6)
         b1 = _pb("Plot 1"); b1.clicked.connect(self._start_animation); r1.addWidget(b1)
         r1.addWidget(_l("n"));  self.s_n = _e("3", 42);  r1.addWidget(self.s_n)
@@ -384,7 +409,6 @@ class FourierLab(QMainWindow):
         r1.addWidget(_l("x Periods")); self.s_xp = _e("-2 -1 1 2", 100); r1.addWidget(self.s_xp)
         r1.addStretch(); cl.addLayout(r1)
 
-        # Row 2:  [Plot 2]  Xmin  Xmax  y function  Plot f
         r2 = QHBoxLayout(); r2.setSpacing(6)
         b2 = _pb("Plot 2"); b2.clicked.connect(self._start_animation); r2.addWidget(b2)
         r2.addWidget(_l("Xmin")); self.s_xmin = _e("-2", 42); r2.addWidget(self.s_xmin)
@@ -393,27 +417,25 @@ class FourierLab(QMainWindow):
         self.s_plotf = QCheckBox("Plot f"); r2.addWidget(self.s_plotf)
         r2.addStretch(); cl.addLayout(r2)
 
-        # Row 3:  [Plot 3]  Ymin  Ymax  Speed  Grid
         r3 = QHBoxLayout(); r3.setSpacing(6)
         b3 = _pb("Plot 3"); b3.clicked.connect(self._start_animation); r3.addWidget(b3)
         r3.addWidget(_l("Ymin")); self.s_ymin = _e("-1.5", 42); r3.addWidget(self.s_ymin)
         r3.addWidget(_l("Ymax")); self.s_ymax = _e("1.5", 42); r3.addWidget(self.s_ymax)
         r3.addWidget(_l("Speed"))
         self.s_speed = QDoubleSpinBox()
-        self.s_speed.setRange(0.01, 5.0); self.s_speed.setValue(0.1)
+        self.s_speed.setRange(0.01, 5.0); self.s_speed.setValue(0.3)
         self.s_speed.setSingleStep(0.05); self.s_speed.setFixedWidth(68)
         r3.addWidget(self.s_speed)
         self.s_grid = QCheckBox("Grid"); self.s_grid.setChecked(True)
         r3.addWidget(self.s_grid)
         r3.addStretch(); cl.addLayout(r3)
 
-        # Row 4:  [Pause]  [Save]  [Compute]  x  Result
         r4 = QHBoxLayout(); r4.setSpacing(6)
-        self.s_pause = QPushButton("Pause")
+        self.s_pause = _pab("⏸  Pause")
         self.s_pause.clicked.connect(self._toggle_pause); r4.addWidget(self.s_pause)
-        self.s_save = QPushButton("Save")
+        self.s_save = QPushButton("💾  Save")
         self.s_save.clicked.connect(self._save_figure); r4.addWidget(self.s_save)
-        self.s_comp = QPushButton("Compute")
+        self.s_comp = QPushButton("⚙  Compute")
         self.s_comp.clicked.connect(self._eval_x0); r4.addWidget(self.s_comp)
         r4.addWidget(_l("x")); self.s_x0 = _e("1", 42); r4.addWidget(self.s_x0)
         r4.addWidget(_l("Result"))
@@ -421,38 +443,20 @@ class FourierLab(QMainWindow):
         r4.addWidget(self.s_result)
         r4.addStretch(); cl.addLayout(r4)
 
-        # ── auto-update result whenever n or x changes ──────────────────
+        # signal connections
         self.s_n.textChanged.connect(self._eval_x0)
         self.s_x0.textChanged.connect(self._eval_x0)
-
-        # ── pressing Enter in n field restarts animation ─────────────────
         self.s_n.returnPressed.connect(self._start_animation)
-
-        # ── editing n then clicking away redraws immediately ─────────────
         self.s_n.editingFinished.connect(self._draw_at_current_n)
-
-        # ── Plot f / Grid checkboxes → immediate redraw ──────────────────
         self.s_plotf.stateChanged.connect(self._draw_at_current_n)
         self.s_grid.stateChanged.connect(self._draw_at_current_n)
-
-        # ── Xmin / Xmax / Ymin / Ymax fields → redraw on edit ────────────
-        self.s_xmin.editingFinished.connect(self._draw_at_current_n)
-        self.s_xmax.editingFinished.connect(self._draw_at_current_n)
-        self.s_ymin.editingFinished.connect(self._draw_at_current_n)
-        self.s_ymax.editingFinished.connect(self._draw_at_current_n)
-        self.s_xmin.returnPressed.connect(self._draw_at_current_n)
-        self.s_xmax.returnPressed.connect(self._draw_at_current_n)
-        self.s_ymin.returnPressed.connect(self._draw_at_current_n)
-        self.s_ymax.returnPressed.connect(self._draw_at_current_n)
-
-        # ── T field → recompute coefficients + restart animation ─────────
+        for field in (self.s_xmin, self.s_xmax, self.s_ymin, self.s_ymax):
+            field.editingFinished.connect(self._draw_at_current_n)
+            field.returnPressed.connect(self._draw_at_current_n)
         self.s_T.editingFinished.connect(self._on_T_changed)
         self.s_T.returnPressed.connect(self._on_T_changed)
-
-        # ── Speed spinbox → update timer interval live ───────────────────
         self.s_speed.valueChanged.connect(self._on_speed_changed)
 
-        # Row 5:  Spectrum buttons + Waveform combo
         r5 = QHBoxLayout(); r5.setSpacing(6)
         sa = _sb("Spectrum an");  sa.clicked.connect(lambda: self._jump_sp("an"));  r5.addWidget(sa)
         sb_ = _sb("Spectrum bn"); sb_.clicked.connect(lambda: self._jump_sp("bn")); r5.addWidget(sb_)
@@ -468,7 +472,6 @@ class FourierLab(QMainWindow):
 
         bot.addWidget(ctrl, 5)
 
-        # Formula panel (right)
         ff = QFrame(); ff.setObjectName("formula_frame")
         ffl = QVBoxLayout(ff); ffl.setContentsMargins(4, 4, 4, 4)
         self.formula_w = FormulaWidget(4.4, 2.6)
@@ -477,7 +480,6 @@ class FourierLab(QMainWindow):
         bot.addWidget(ff, 3)
         vl.addLayout(bot, 3)
 
-        # Series result bar (bottom)
         sf = QFrame(); sf.setObjectName("series_frame")
         sfl = QHBoxLayout(sf); sfl.setContentsMargins(4, 2, 4, 2)
         self.series_w = FormulaWidget(9, 0.9)
@@ -486,7 +488,7 @@ class FourierLab(QMainWindow):
 
         self.stack.addWidget(page)
 
-    # ─── helpers ───
+    # ─── series helpers ──────────────────────────────────────────────────
     def _on_wave(self, i):
         self.s_T.setText(str(WAVEFORMS[i]["T"]))
         self._start_animation()
@@ -507,148 +509,125 @@ class FourierLab(QMainWindow):
             self._cache_key, self._cache_T = key, T
         return key, T
 
-    # ═══════════════════════════════════════════
-    #  ANIMATION ENGINE
-    #
-    #  _start_animation()   → resets to n=0, starts timer
-    #  _anim_step()         → called each tick: n++ then draw
-    #  _toggle_pause()      → pause / resume / restart
-    #  _stop_animation()    → hard stop
-    #
-    #  Every Plot button, every waveform change calls
-    #  _start_animation() so the user always sees n=1,
-    #  n=2, n=3 … building up step by step.
-    # ═══════════════════════════════════════════
-
+    # ── Fourier Series Animation Engine ──────────────────────────────────
     def _start_animation(self):
-        """Animate from n=1 up to the target n, one step at a time."""
         self._anim_timer.stop()
         self._ensure_coeffs()
-        self._anim_cur    = 0               # next tick will show n=1
+        self._anim_cur    = 0
         self._anim_target = self._target_n()
         self._anim_paused = False
-        self.s_pause.setText("Pause")
-        # interval from Speed spinbox (seconds → ms, minimum 40ms)
+        self.s_pause.setText("⏸  Pause")
         ms = max(40, int(1000 * self.s_speed.value()))
         self._anim_timer.start(ms)
 
     def _anim_step(self):
-        """One timer tick: advance n by 1, draw the frame."""
         self._anim_cur += 1
         n = self._anim_cur
-
-        # reached target → stop cleanly
         if n > self._anim_target:
             self._anim_timer.stop()
-            self.s_pause.setText("Play")
+            self.s_pause.setText("▶  Play")
             return
-
         key = WAVEFORMS[self.s_combo.currentIndex()]["key"]
-        T   = self._fval(self.s_T, 4.0)
-        L   = T / 2
-
-        # show current step in the n field
+        T   = self._fval(self.s_T, 4.0); L = T / 2
         self.s_n.setText(str(n))
-
-        # draw this harmonic step
         self._draw_frame(key, T, n)
-
-        # update series formula at bottom
         self.series_w.show_series(self._a0, self._an, self._bn, L, min(n, 5))
 
     def _toggle_pause(self):
         if self._anim_timer.isActive():
-            # playing → pause
-            self._anim_timer.stop()
-            self._anim_paused = True
-            self.s_pause.setText("Play")
+            self._anim_timer.stop(); self._anim_paused = True
+            self.s_pause.setText("▶  Play")
         elif self._anim_paused and self._anim_cur < self._anim_target:
-            # paused mid-way → resume from where we stopped
             ms = max(40, int(1000 * self.s_speed.value()))
-            self._anim_timer.start(ms)
-            self._anim_paused = False
-            self.s_pause.setText("Pause")
+            self._anim_timer.start(ms); self._anim_paused = False
+            self.s_pause.setText("⏸  Pause")
         else:
-            # finished or never started → restart from n=1
             self._start_animation()
 
     def _stop_animation(self):
-        self._anim_timer.stop()
-        self._anim_paused = False
+        self._anim_timer.stop(); self._anim_paused = False
 
-    # ─── draw one frame ───
+    # ─── draw one Series frame (dual panel) ──────────────────────────────
     def _draw_frame(self, key, T, n):
         L    = T / 2
         xmin = self._fval(self.s_xmin, -2)
         xmax = self._fval(self.s_xmax, 11)
         ymin = self._fval(self.s_ymin, -1.5)
-        ymax = self._fval(self.s_ymax, 1.5)
+        ymax = self._fval(self.s_ymax,  1.5)
 
-        x  = np.linspace(xmin, xmax, 3000)
-        yo = get_wave(key, x, T)
-        yr = reconstruct(x, self._a0, self._an, self._bn, L, n)
+        x       = np.linspace(xmin, xmax, 3000)
+        yo      = get_wave(key, x, T)
+        yr_prev = reconstruct(x, self._a0, self._an, self._bn, L, max(0, n - 1))
+        yr      = reconstruct(x, self._a0, self._an, self._bn, L, n)
 
+        # ── TOP: cumulative reconstruction ───────────────────────────────
         ax = self.s_ax; ax.clear(); init_ax(ax)
-
         if self.s_grid.isChecked():
             ax.grid(True, alpha=0.35, color=GRID, lw=0.5)
         else:
             ax.grid(False)
-
-        # original waveform (dim gray outline)
-        ax.plot(x, yo, color="#555580", lw=1.2, alpha=0.65)
+        ax.plot(x, yo, color="#44445a", lw=1.2, alpha=0.55, zorder=1)
         if self.s_plotf.isChecked():
-            ax.plot(x, yo, color=TEXT2, lw=1.6, label="f(x)")
-
-        # Fourier reconstruction — bright colored
-        ax.plot(x, yr, color="#5cb8ff", lw=2.3, label=f"Fourier  n = {n}")
-
-        # dashed red reference lines
+            ax.plot(x, yo, color=TEXT2, lw=1.6, label="f(x)", zorder=2)
+        if n > 1:
+            ax.plot(x, yr_prev, color="#2255aa", lw=1.4, alpha=0.40, zorder=3)
+        ax.plot(x, yr, color="#5cb8ff", lw=2.4, label=f"Fourier  n = {n}", zorder=5)
         ax.axhline(0, color=RED, lw=0.7, ls="--", alpha=0.4)
         ax.axvline(0, color=RED, lw=0.7, ls="--", alpha=0.4)
-
-        # n = label (large, top-left)
         ax.annotate(f"n = {n}", xy=(0.02, 0.92), xycoords="axes fraction",
                     fontsize=16, fontweight="bold", color=TEXT)
-
-        # RMS error
         rms = np.sqrt(np.mean((yo - yr) ** 2))
-        ax.annotate(f"RMS = {rms:.4f}", xy=(0.02, 0.82), xycoords="axes fraction",
+        ax.annotate(f"RMS = {rms:.4f}", xy=(0.02, 0.80), xycoords="axes fraction",
                     fontsize=10, color=ORANGE)
-
         ax.set_ylim(ymin, ymax); ax.set_xlim(xmin, xmax)
         ax.set_xlabel("x"); ax.set_ylabel("f(x)")
         ax.legend(facecolor=PLOT_BG, edgecolor=GRID, labelcolor=TEXT, fontsize=9,
                   loc="upper right")
-        self.s_fig.tight_layout(pad=0.8)
+
+        # ── BOTTOM: nth harmonic component being added ────────────────────
+        ax2 = self.s_ax2; ax2.clear(); init_ax(ax2)
+        ax2.grid(True, alpha=0.3, color=GRID, lw=0.4)
+        if n >= 1 and n <= len(self._an):
+            a_n, b_n = self._an[n-1], self._bn[n-1]
+            nth = a_n * np.cos(n * np.pi * x / L) + b_n * np.sin(n * np.pi * x / L)
+            amp = np.sqrt(a_n**2 + b_n**2)
+            COLS = [PURPLE, TEAL, PINK, ORANGE, GREEN, ACCENT]
+            col  = COLS[(n - 1) % len(COLS)]
+            ax2.plot(x, nth, color=col, lw=2.0,
+                     label=f"h{n}(x)   a{n}={a_n:.4f}   b{n}={b_n:.4f}   |C|={amp:.4f}")
+            ax2.fill_between(x, nth, alpha=0.12, color=col)
+            ax2.axhline(0, color=GRID, lw=0.5)
+        ax2.set_xlim(xmin, xmax)
+        ax2.set_xlabel("x"); ax2.set_ylabel(f"h{n}(x)", fontsize=9)
+        ax2.set_title(f"Harmonic  n = {n}  →  being added to the sum",
+                      color=TEAL, fontsize=9, fontweight="bold")
+        ax2.legend(facecolor=PLOT_BG, edgecolor=GRID, labelcolor=TEXT,
+                   fontsize=8, loc="upper right")
+
+        self.s_fig.tight_layout(pad=0.6)
         self.s_canvas.draw()
 
+    # ─── other series helpers ─────────────────────────────────────────────
     def _eval_x0(self):
         try:
             self._ensure_coeffs()
             x0 = float(self.s_x0.text()); T = self._fval(self.s_T, 4.0); L = T / 2
-            n = self._target_n()
-            v = reconstruct(np.array([x0]), self._a0, self._an, self._bn, L, n)[0]
+            n  = self._target_n()
+            v  = reconstruct(np.array([x0]), self._a0, self._an, self._bn, L, n)[0]
             self.s_result.setText(f"{v:.6f}")
         except Exception as e:
             self.s_result.setText(f"Err: {e}")
 
     def _save_figure(self):
-        """Save the current Fourier Series plot to a PNG file."""
         from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Plot", "fourier_series.png",
-            "PNG Image (*.png);;PDF File (*.pdf);;SVG File (*.svg)"
-        )
+            "PNG Image (*.png);;PDF File (*.pdf);;SVG File (*.svg)")
         if path:
-            self.s_fig.savefig(path, dpi=150, bbox_inches="tight",
-                               facecolor=PLOT_BG)
+            self.s_fig.savefig(path, dpi=150, bbox_inches="tight", facecolor=PLOT_BG)
 
     def _draw_at_current_n(self):
-        """Immediately draw the plot at the current n (no animation) when
-        the user edits the n field without pressing Play."""
-        if self._anim_timer.isActive():
-            return   # let the running animation handle drawing
+        if self._anim_timer.isActive(): return
         try:
             key, T = self._ensure_coeffs()
             n = self._target_n()
@@ -659,24 +638,22 @@ class FourierLab(QMainWindow):
             pass
 
     def _on_T_changed(self):
-        """T was edited — invalidate the coefficient cache and restart."""
-        self._cache_key = None          # force recompute
+        self._cache_key = None
         self._start_animation()
 
     def _on_speed_changed(self, val):
-        """Speed spinbox changed — update the running timer interval live."""
         if self._anim_timer.isActive():
-            ms = max(40, int(1000 * val))
-            self._anim_timer.setInterval(ms)
+            self._anim_timer.setInterval(max(40, int(1000 * val)))
 
     def _jump_sp(self, mode):
-        self._stop_animation()
+        self._stop_all_animations()
         self._set_nav("spectrum"); self.stack.setCurrentIndex(1)
-        self.sp_mode = mode; self._compute_spectrum()
+        self.sp_mode = mode
+        self._sp_compute_and_animate()
 
-    # ═══════════════════════════════════════════
-    #  PAGE 2 — SPECTRUM
-    # ═══════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════
+    #  PAGE 2 — SPECTRUM  (animated bar-by-bar + energy trace)
+    # ═══════════════════════════════════════════════════════════════════
     def _build_spectrum_page(self):
         page = QWidget()
         vl = QVBoxLayout(page); vl.setContentsMargins(10, 8, 10, 6); vl.setSpacing(6)
@@ -691,29 +668,38 @@ class FourierLab(QMainWindow):
         g1 = QGroupBox("Waveform"); g1l = QVBoxLayout(g1)
         self.sp_combo = QComboBox()
         self.sp_combo.addItems([w["name"] for w in WAVEFORMS])
-        self.sp_combo.currentIndexChanged.connect(self._compute_spectrum)
+        self.sp_combo.currentIndexChanged.connect(self._sp_compute_and_animate)
         g1l.addWidget(self.sp_combo); ll.addWidget(g1)
 
         g2 = QGroupBox("Spectrum Type"); g2l = QGridLayout(g2)
         self.sp_mode = "amplitude"
-        for i, (txt, m) in enumerate([("aₙ","an"),("bₙ","bn"),("Amplitude","amplitude"),("Phase","phase")]):
+        for i, (txt, m) in enumerate([("aₙ","an"),("bₙ","bn"),
+                                       ("Amplitude","amplitude"),("Phase","phase")]):
             b = QPushButton(txt); b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda _, mm=m: (setattr(self, "sp_mode", mm), self._compute_spectrum()))
+            b.clicked.connect(lambda _, mm=m: (setattr(self, "sp_mode", mm),
+                                               self._sp_compute_and_animate()))
             g2l.addWidget(b, i//2, i%2)
         ll.addWidget(g2)
 
         g3 = QGroupBox("Range"); g3l = QVBoxLayout(g3)
         rr = QHBoxLayout(); rr.addWidget(_l("n max"))
-        self.sp_nmax = _e("20", 45); rr.addWidget(self.sp_nmax); rr.addStretch(); g3l.addLayout(rr)
+        self.sp_nmax = _e("20", 45); rr.addWidget(self.sp_nmax); rr.addStretch()
+        g3l.addLayout(rr)
         rr2 = QHBoxLayout(); rr2.addWidget(_l("T"))
-        self.sp_T = _e("4", 45); rr2.addWidget(self.sp_T); rr2.addStretch(); g3l.addLayout(rr2)
-        ll.addWidget(g3)
+        self.sp_T = _e("4", 45); rr2.addWidget(self.sp_T); rr2.addStretch()
+        g3l.addLayout(rr2); ll.addWidget(g3)
 
-        go = _ab("▶  Compute Spectrum"); go.clicked.connect(self._compute_spectrum); ll.addWidget(go)
+        br = QHBoxLayout(); br.setSpacing(6)
+        go = _ab("▶  Animate Spectrum")
+        go.clicked.connect(self._sp_compute_and_animate); br.addWidget(go)
+        self.sp_pause = _pab("⏸  Pause")
+        self.sp_pause.clicked.connect(self._sp_toggle_pause); br.addWidget(self.sp_pause)
+        ll.addLayout(br)
 
         g4 = QGroupBox("Properties"); g4l = QVBoxLayout(g4)
         self.sp_info = QLabel("…"); self.sp_info.setWordWrap(True)
-        self.sp_info.setStyleSheet(f"font-family:'Courier New',monospace;font-size:11px;color:{TEXT};")
+        self.sp_info.setStyleSheet(
+            f"font-family:'Courier New',monospace;font-size:11px;color:{TEXT};")
         g4l.addWidget(self.sp_info); ll.addWidget(g4); ll.addStretch()
         body.addWidget(lw)
 
@@ -726,46 +712,102 @@ class FourierLab(QMainWindow):
         body.addWidget(pf, 1)
         vl.addLayout(body, 1); self.stack.addWidget(page)
 
-    def _compute_spectrum(self):
+    def _sp_compute_and_animate(self):
         try:
-            w = WAVEFORMS[self.sp_combo.currentIndex()]; key = w["key"]
-            T = self._fval(self.sp_T, w["T"])
-            N = max(5, int(self._fval(self.sp_nmax, 20)))
+            self._sp_timer.stop()
+            w   = WAVEFORMS[self.sp_combo.currentIndex()]; key = w["key"]
+            T   = self._fval(self.sp_T, w["T"])
+            N   = max(5, int(self._fval(self.sp_nmax, 20)))
             a0, an, bn = compute_coeffs(key, T, max(N, 60))
-            ns = np.arange(1, N+1)
-            ax1, ax2 = self.sp_ax1, self.sp_ax2
-            ax1.clear(); ax2.clear(); init_ax(ax1); init_ax(ax2)
-            m = self.sp_mode
-            if   m=="an":        v,yl,tt,bc = an[:N],"aₙ","Cosine Coefficients aₙ",ACCENT
-            elif m=="bn":        v,yl,tt,bc = bn[:N],"bₙ","Sine Coefficients bₙ",PURPLE
-            elif m=="amplitude": v,yl,tt,bc = np.sqrt(an[:N]**2+bn[:N]**2),"Cₙ","Amplitude Spectrum",GREEN
-            else:                v,yl,tt,bc = np.arctan2(bn[:N],an[:N])*180/np.pi,"Phase°","Phase Spectrum",ORANGE
-            cols=[bc if abs(vv)>1e-4 else "#181830" for vv in v]
-            ax1.bar(ns,v,color=cols,alpha=0.85,width=0.7,edgecolor=GRID)
-            ax1.axhline(0,color=GRID,lw=0.5)
-            ax1.set_title(tt,color=TEXT,fontweight="bold",fontsize=11)
-            ax1.set_xlabel("Harmonic n"); ax1.set_ylabel(yl)
-            if abs(a0)>1e-5:
-                ax1.annotate(f"DC a₀={a0:.4f}",xy=(0.70,0.90),xycoords="axes fraction",fontsize=9,color=TEAL)
-            amp=np.sqrt(an[:N]**2+bn[:N]**2)
-            te=2*a0**2+np.sum(amp**2/2)
-            ce=(2*a0**2+np.cumsum(amp**2/2))/te*100 if te>0 else np.zeros(N)
-            ax2.plot(ns,ce,color=TEAL,lw=2.2,label="Energy %")
-            ax2.fill_between(ns,ce,alpha=0.12,color=TEAL)
-            ax2.axhline(95,color=ORANGE,lw=1,ls="--",alpha=0.6,label="95%")
-            ax2.axhline(99,color=RED,lw=1,ls="--",alpha=0.6,label="99%")
-            ax2.set_ylim(0,105); ax2.set_xlabel("Harmonic n"); ax2.set_ylabel("Energy %")
-            ax2.set_title("Cumulative Energy",color=TEXT,fontweight="bold",fontsize=10)
-            ax2.legend(facecolor=PLOT_BG,edgecolor=GRID,labelcolor=TEXT,fontsize=8)
-            self.sp_fig.tight_layout(pad=1.4); self.sp_canvas.draw()
-            n95=int(np.searchsorted(ce,95)+1); n99=int(np.searchsorted(ce,99)+1)
-            self.sp_info.setText(f"DC a₀ = {a0:.5f}\nMax|aₙ|= {np.max(np.abs(an[:N])):.5f}\n"
-                                 f"Max|bₙ|= {np.max(np.abs(bn[:N])):.5f}\n\n95% at n={n95}\n99% at n={n99}")
-        except Exception as e: self.sp_info.setText(str(e))
+            ns  = np.arange(1, N + 1)
+            m   = self.sp_mode
+            if   m == "an":        v,yl,tt,bc = an[:N],"aₙ","Cosine Coefficients aₙ", ACCENT
+            elif m == "bn":        v,yl,tt,bc = bn[:N],"bₙ","Sine Coefficients bₙ",   PURPLE
+            elif m == "amplitude": v,yl,tt,bc = (np.sqrt(an[:N]**2+bn[:N]**2),
+                                                  "Cₙ","Amplitude Spectrum",GREEN)
+            else:                  v,yl,tt,bc = (np.arctan2(bn[:N],an[:N])*180/np.pi,
+                                                  "Phase°","Phase Spectrum",ORANGE)
+            cols = [bc if abs(vv) > 1e-4 else "#181830" for vv in v]
+            amp  = np.sqrt(an[:N]**2 + bn[:N]**2)
+            te   = 2*a0**2 + np.sum(amp**2/2)
+            ce   = (2*a0**2 + np.cumsum(amp**2/2)) / te * 100 if te > 0 else np.zeros(N)
+            n95  = int(np.searchsorted(ce, 95) + 1)
+            n99  = int(np.searchsorted(ce, 99) + 1)
+            self.sp_info.setText(
+                f"DC a₀ = {a0:.5f}\nMax|aₙ|= {np.max(np.abs(an[:N])):.5f}\n"
+                f"Max|bₙ|= {np.max(np.abs(bn[:N])):.5f}\n\n"
+                f"95% at n={n95}\n99% at n={n99}")
 
-    # ═══════════════════════════════════════════
-    #  PAGE 3 — FFT
-    # ═══════════════════════════════════════════
+            self._sp_data        = dict(ns=ns, v=v, yl=yl, tt=tt, bc=bc,
+                                        cols=cols, amp=amp, ce=ce, a0=a0, N=N)
+            self._sp_anim_cur    = 0
+            self._sp_anim_paused = False
+            self.sp_pause.setText("⏸  Pause")
+
+            self.sp_ax1.clear(); self.sp_ax2.clear()
+            init_ax(self.sp_ax1); init_ax(self.sp_ax2)
+            self.sp_fig.tight_layout(pad=1.4); self.sp_canvas.draw()
+            self._sp_timer.start(55)          # ~18 fps
+        except Exception as e:
+            self.sp_info.setText(str(e))
+
+    def _sp_anim_step(self):
+        d = self._sp_data
+        if d is None: self._sp_timer.stop(); return
+        self._sp_anim_cur += 1
+        i = self._sp_anim_cur
+        if i > d["N"]:
+            self._sp_timer.stop(); self.sp_pause.setText("▶  Play"); return
+
+        ns, v, yl, tt, bc, cols = d["ns"], d["v"], d["yl"], d["tt"], d["bc"], d["cols"]
+        ce, a0 = d["ce"], d["a0"]
+
+        ax1, ax2 = self.sp_ax1, self.sp_ax2
+        ax1.clear(); ax2.clear(); init_ax(ax1); init_ax(ax2)
+
+        # already-shown bars (solid)
+        if i > 1:
+            ax1.bar(ns[:i-1], v[:i-1], color=cols[:i-1],
+                    alpha=0.80, width=0.7, edgecolor=GRID)
+        # current bar: bright flash
+        ax1.bar([ns[i-1]], [v[i-1]], color=[bc], alpha=1.0,
+                width=0.85, edgecolor="white", linewidth=0.9)
+        ax1.axhline(0, color=GRID, lw=0.5)
+        ax1.set_title(f"{tt}  —  n = {i}", color=TEXT, fontweight="bold", fontsize=11)
+        ax1.set_xlabel("Harmonic n"); ax1.set_ylabel(yl)
+        ax1.set_xlim(0, d["N"] + 1)
+        if abs(a0) > 1e-5:
+            ax1.annotate(f"DC a₀={a0:.4f}", xy=(0.70, 0.90),
+                         xycoords="axes fraction", fontsize=9, color=TEAL)
+
+        # energy curve tracing
+        if i > 1:
+            ax2.plot(ns[:i], ce[:i], color=TEAL, lw=2.2)
+            ax2.fill_between(ns[:i], ce[:i], alpha=0.12, color=TEAL)
+        if i >= 1:
+            ax2.plot(ns[i-1], ce[i-1], "o", color=TEAL, ms=7, zorder=5)
+        ax2.axhline(95, color=ORANGE, lw=1, ls="--", alpha=0.6, label="95%")
+        ax2.axhline(99, color=RED,    lw=1, ls="--", alpha=0.6, label="99%")
+        ax2.set_ylim(0, 105); ax2.set_xlim(0, d["N"] + 1)
+        ax2.set_xlabel("Harmonic n"); ax2.set_ylabel("Energy %")
+        ax2.set_title("Cumulative Energy", color=TEXT, fontweight="bold", fontsize=10)
+        ax2.legend(facecolor=PLOT_BG, edgecolor=GRID, labelcolor=TEXT, fontsize=8)
+        self.sp_fig.tight_layout(pad=1.4); self.sp_canvas.draw()
+
+    def _sp_toggle_pause(self):
+        if self._sp_timer.isActive():
+            self._sp_timer.stop(); self._sp_anim_paused = True
+            self.sp_pause.setText("▶  Play")
+        elif (self._sp_anim_paused and self._sp_data
+              and self._sp_anim_cur < self._sp_data["N"]):
+            self._sp_timer.start(55); self._sp_anim_paused = False
+            self.sp_pause.setText("⏸  Pause")
+        else:
+            self._sp_compute_and_animate()
+
+    # ═══════════════════════════════════════════════════════════════════
+    #  PAGE 3 — FFT  (oscilloscope sweep + frequency grow)
+    # ═══════════════════════════════════════════════════════════════════
     def _build_fft_page(self):
         page = QWidget()
         vl = QVBoxLayout(page); vl.setContentsMargins(10, 8, 10, 6); vl.setSpacing(6)
@@ -791,15 +833,23 @@ class FourierLab(QMainWindow):
         g2l.addWidget(QLabel("Reduces spectral leakage")); ll.addWidget(g2)
 
         g3 = QGroupBox("Display"); g3l = QVBoxLayout(g3)
-        self.f_db = QCheckBox("dB Scale"); self.f_db.stateChanged.connect(lambda: self._compute_fft())
+        self.f_db    = QCheckBox("dB Scale")
+        self.f_db.stateChanged.connect(lambda: self._compute_fft())
         g3l.addWidget(self.f_db)
-        self.f_phase = QCheckBox("Phase"); self.f_phase.stateChanged.connect(lambda: self._compute_fft())
+        self.f_phase = QCheckBox("Phase")
+        self.f_phase.stateChanged.connect(lambda: self._compute_fft())
         g3l.addWidget(self.f_phase); ll.addWidget(g3)
 
-        go = _ab("▶  Run FFT"); go.clicked.connect(self._compute_fft); ll.addWidget(go)
+        br2 = QHBoxLayout(); br2.setSpacing(6)
+        go = _ab("▶  Run FFT"); go.clicked.connect(self._compute_fft); br2.addWidget(go)
+        self.f_pause = _pab("⏸  Pause")
+        self.f_pause.clicked.connect(self._fft_toggle_pause); br2.addWidget(self.f_pause)
+        ll.addLayout(br2)
+
         g4 = QGroupBox("Properties"); g4l = QVBoxLayout(g4)
         self.f_info = QLabel("…"); self.f_info.setWordWrap(True)
-        self.f_info.setStyleSheet(f"font-family:'Courier New',monospace;font-size:11px;color:{TEXT};")
+        self.f_info.setStyleSheet(
+            f"font-family:'Courier New',monospace;font-size:11px;color:{TEXT};")
         g4l.addWidget(self.f_info); ll.addWidget(g4); ll.addStretch()
         body.addWidget(lw)
 
@@ -813,80 +863,172 @@ class FourierLab(QMainWindow):
         vl.addLayout(body, 1); self.stack.addWidget(page)
 
     def _on_fft(self, i):
-        self.f_desc.setText(FFT_SIGNALS[i].get("desc", "")); self._compute_fft()
+        self.f_desc.setText(FFT_SIGNALS[i].get("desc", ""))
+        self._compute_fft()
 
     def _compute_fft(self):
         try:
-            sig = FFT_SIGNALS[self.f_combo.currentIndex()]
+            self._fft_timer.stop()
+            sig  = FFT_SIGNALS[self.f_combo.currentIndex()]
             fs, dur = sig["fs"], sig["dur"]
-            t, y = get_fft_signal(sig["key"], fs, dur); N = len(y)
+            t, y = get_fft_signal(sig["key"], fs, dur)
+            N = len(y)
             wn = self.f_win.currentText()
             if   "Hanning"  in wn: w = np.hanning(N)
             elif "Hamming"  in wn: w = np.hamming(N)
             elif "Blackman" in wn: w = np.blackman(N)
             else:                  w = np.ones(N)
-            yw = y*w; wg = max(np.mean(w), 1e-9)
-            Y = np.fft.rfft(yw); fr = np.fft.rfftfreq(N, 1/fs)
-            mag = np.abs(Y)*2/(N*wg); mag[0] /= 2
-            ph = np.angle(Y, deg=True)
+            yw  = y * w; wg = max(float(np.mean(w)), 1e-9)
+            Y   = np.fft.rfft(yw); fr = np.fft.rfftfreq(N, 1/fs)
+            mag = np.abs(Y) * 2 / (N * wg); mag[0] /= 2
+            ph  = np.angle(Y, deg=True)
+            db  = self.f_db.isChecked()
+            show_phase = self.f_phase.isChecked()
 
-            axt, axf = self.f_axt, self.f_axf
-            axt.clear(); axf.clear(); init_ax(axt); init_ax(axf)
-            axt.plot(t*1e3, y, color="#5cb8ff", lw=1.5, label="Signal")
-            if wn != "Rectangular":
-                axt.plot(t*1e3, yw, color=ORANGE, lw=1, ls="--", alpha=0.6, label=f"+ {wn}")
-            axt.set_title("Time Domain", color=TEXT, fontweight="bold", fontsize=11)
-            axt.set_xlabel("Time (ms)"); axt.set_ylabel("Amplitude")
-            axt.legend(facecolor=PLOT_BG, edgecolor=GRID, labelcolor=TEXT, fontsize=8)
+            pf_ = fr[np.argmax(mag[1:]) + 1]
+            self.f_info.setText(
+                f"N={N}  fs={fs:.0f} Hz\nDur={dur*1e3:.0f} ms\n"
+                f"Df={fs/N:.2f} Hz\nNyquist={fs/2:.0f} Hz\n\n"
+                f"Peak={pf_:.1f} Hz\nMax={np.max(mag):.4f}\nWindow={wn}")
 
-            db = self.f_db.isChecked()
-            mp = 20*np.log10(np.maximum(mag, 1e-10)) if db else mag
-            yl = "dBFS" if db else "Magnitude"
-            if self.f_phase.isChecked():
-                axf.plot(fr, mp, color=GREEN, lw=1.5, label="Magnitude")
-                ax2 = axf.twinx()
-                ax2.plot(fr, ph, color=ORANGE, lw=0.8, alpha=0.5, label="Phase")
-                ax2.set_ylabel("Phase deg", color=ORANGE); ax2.tick_params(colors=ORANGE)
-                ax2.set_facecolor("none")
-            else:
-                axf.fill_between(fr, mp, alpha=0.18, color=GREEN)
-                axf.plot(fr, mp, color=GREEN, lw=1.5, label="FFT")
-                th = np.max(mp)*0.15; pks = []
-                for i in range(1, len(mp)-1):
-                    if mp[i]>mp[i-1] and mp[i]>mp[i+1] and mp[i]>th: pks.append((fr[i], mp[i]))
-                pks.sort(key=lambda p: p[1], reverse=True)
-                for fx, my in pks[:5]:
-                    axf.annotate(f"{fx:.0f} Hz", xy=(fx, my), xytext=(fx+fs*0.012, my*0.96),
-                                 fontsize=8, color=ORANGE,
-                                 arrowprops=dict(arrowstyle="->", color=ORANGE, lw=0.7))
-            axf.set_title("Frequency Domain", color=TEXT, fontweight="bold", fontsize=11)
-            axf.set_xlabel("Frequency (Hz)"); axf.set_ylabel(yl)
-            axf.legend(facecolor=PLOT_BG, edgecolor=GRID, labelcolor=TEXT, fontsize=8)
+            self._fft_data = dict(t=t, y=y, yw=yw, wn=wn, fr=fr,
+                                  mag=mag, ph=ph, db=db, fs=fs, dur=dur,
+                                  N=N, show_phase=show_phase)
+            self._fft_phase       = 0
+            self._fft_anim_cur    = 0
+            self._fft_anim_paused = False
+            self.f_pause.setText("⏸  Pause")
+
+            self.f_axt.clear(); self.f_axf.clear()
+            init_ax(self.f_axt); init_ax(self.f_axf)
             self.f_fig.tight_layout(pad=1.4); self.f_canvas.draw()
 
-            pf_ = fr[np.argmax(mag[1:])+1]
-            self.f_info.setText(f"N={N}  fs={fs:.0f} Hz\nDur={dur*1e3:.0f} ms\n"
-                                f"Df={fs/N:.2f} Hz\nNyquist={fs/2:.0f} Hz\n\n"
-                                f"Peak={pf_:.1f} Hz\nMax={np.max(mag):.4f}\nWindow={wn}")
-        except Exception as e: self.f_info.setText(str(e))
+            self._fft_timer.start(8)   # 8 ms → smooth sweep
 
+        except Exception as e:
+            self.f_info.setText(str(e))
 
-# ═══════════════════════════════════════════════════════
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    app.setStyle("Fusion")
-    p = QPalette()
-    p.setColor(QPalette.Window, QColor(BG))
-    p.setColor(QPalette.WindowText, QColor(TEXT))
-    p.setColor(QPalette.Base, QColor(BG_INPUT))
-    p.setColor(QPalette.AlternateBase, QColor(BG_CARD))
-    p.setColor(QPalette.ToolTipBase, QColor(BG_CARD))
-    p.setColor(QPalette.ToolTipText, QColor(TEXT))
-    p.setColor(QPalette.Text, QColor(TEXT))
-    p.setColor(QPalette.Button, QColor(BG_BTN))
-    p.setColor(QPalette.ButtonText, QColor(TEXT))
-    p.setColor(QPalette.Highlight, QColor(ACCENT))
-    p.setColor(QPalette.HighlightedText, QColor("#ffffff"))
-    app.setPalette(p)
-    win = FourierLab(); win.show()
-    sys.exit(app.exec())
+    def _fft_anim_step(self):
+        d = self._fft_data
+        if d is None: self._fft_timer.stop(); return
+
+        t, y, yw, wn = d["t"], d["y"], d["yw"], d["wn"]
+        fr, mag, ph  = d["fr"], d["mag"], d["ph"]
+        db, fs       = d["db"], d["fs"]
+        show_phase   = d["show_phase"]
+        Nt, Nf       = len(t), len(fr)
+
+        if self._fft_phase == 0:
+            # ── Phase 0: oscilloscope sweep ──────────────────────────────
+            step = max(1, Nt // 80)
+            self._fft_anim_cur = min(self._fft_anim_cur + step, Nt)
+            i = self._fft_anim_cur
+
+            axt = self.f_axt; axt.clear(); init_ax(axt)
+            axt.plot(t[:i]*1e3, y[:i], color="#5cb8ff", lw=1.6)
+            if wn != "Rectangular" and i > 0:
+                axt.plot(t[:i]*1e3, yw[:i], color=ORANGE,
+                         lw=1.0, ls="--", alpha=0.55, label=f"+ {wn}")
+            if i < Nt:
+                axt.axvline(t[i]*1e3, color=GREEN, lw=1.2, alpha=0.8, ls=":")
+            axt.set_xlim(t[0]*1e3, t[-1]*1e3)
+            axt.set_ylim(float(np.min(y)*1.3), float(np.max(y)*1.3))
+            axt.set_title("Time Domain  ⟶  scanning …",
+                          color=TEXT, fontweight="bold", fontsize=11)
+            axt.set_xlabel("Time (ms)"); axt.set_ylabel("Amplitude")
+            self.f_fig.tight_layout(pad=1.4); self.f_canvas.draw()
+
+            if i >= Nt:
+                self._fft_phase = 1; self._fft_anim_cur = 0
+
+        elif self._fft_phase == 1:
+            # ── Phase 1: frequency spectrum grows left → right ───────────
+            step = max(1, Nf // 80)
+            self._fft_anim_cur = min(self._fft_anim_cur + step, Nf)
+            i = self._fft_anim_cur
+
+            mp  = 20*np.log10(np.maximum(mag, 1e-10)) if db else mag
+            mpi = mp[:i]; fri = fr[:i]
+            yl  = "dBFS" if db else "Magnitude"
+
+            axf = self.f_axf; axf.clear(); init_ax(axf)
+            if len(fri) > 0:
+                if show_phase:
+                    axf.plot(fri, mpi, color=GREEN, lw=1.5)
+                    ax2p = axf.twinx()
+                    ax2p.plot(fri, ph[:i], color=ORANGE, lw=0.8, alpha=0.5)
+                    ax2p.set_ylabel("Phase deg", color=ORANGE)
+                    ax2p.tick_params(colors=ORANGE); ax2p.set_facecolor("none")
+                else:
+                    axf.fill_between(fri, mpi, alpha=0.18, color=GREEN)
+                    axf.plot(fri, mpi, color=GREEN, lw=1.5)
+                    axf.plot(fri[-1], mpi[-1], "o", color=GREEN, ms=5, zorder=5)
+            if i < Nf:
+                axf.axvline(fr[i], color=TEAL, lw=1.2, alpha=0.7, ls=":")
+            axf.set_xlim(0, fr[-1])
+            if len(mpi) > 0 and np.max(np.abs(mpi)) > 0:
+                axf.set_ylim((np.min(mpi)*1.1 if db else 0), np.max(mpi)*1.2)
+            axf.set_title("Frequency Domain  ⟶  analyzing …",
+                          color=TEXT, fontweight="bold", fontsize=11)
+            axf.set_xlabel("Frequency (Hz)"); axf.set_ylabel(yl)
+            self.f_fig.tight_layout(pad=1.4); self.f_canvas.draw()
+
+            if i >= Nf:
+                self._fft_timer.stop()
+                self.f_pause.setText("▶  Play")
+                self._fft_draw_final()
+
+    def _fft_draw_final(self):
+        """Fully annotated static final frame after animation completes."""
+        d = self._fft_data
+        if d is None: return
+        t, y, yw, wn = d["t"], d["y"], d["yw"], d["wn"]
+        fr, mag, ph  = d["fr"], d["mag"], d["ph"]
+        db, fs, show_phase = d["db"], d["fs"], d["show_phase"]
+        mp = 20*np.log10(np.maximum(mag, 1e-10)) if db else mag
+        yl = "dBFS" if db else "Magnitude"
+
+        axt, axf = self.f_axt, self.f_axf
+        axt.clear(); axf.clear(); init_ax(axt); init_ax(axf)
+
+        axt.plot(t*1e3, y, color="#5cb8ff", lw=1.5, label="Signal")
+        if wn != "Rectangular":
+            axt.plot(t*1e3, yw, color=ORANGE, lw=1, ls="--", alpha=0.6, label=f"+ {wn}")
+        axt.set_title("Time Domain", color=TEXT, fontweight="bold", fontsize=11)
+        axt.set_xlabel("Time (ms)"); axt.set_ylabel("Amplitude")
+        axt.legend(facecolor=PLOT_BG, edgecolor=GRID, labelcolor=TEXT, fontsize=8)
+
+        if show_phase:
+            axf.plot(fr, mp, color=GREEN, lw=1.5, label="Magnitude")
+            ax2p = axf.twinx()
+            ax2p.plot(fr, ph, color=ORANGE, lw=0.8, alpha=0.5, label="Phase")
+            ax2p.set_ylabel("Phase deg", color=ORANGE)
+            ax2p.tick_params(colors=ORANGE); ax2p.set_facecolor("none")
+        else:
+            axf.fill_between(fr, mp, alpha=0.18, color=GREEN)
+            axf.plot(fr, mp, color=GREEN, lw=1.5, label="FFT")
+            th = np.max(mp)*0.15; pks = []
+            for k in range(1, len(mp)-1):
+                if mp[k] > mp[k-1] and mp[k] > mp[k+1] and mp[k] > th:
+                    pks.append((fr[k], mp[k]))
+            pks.sort(key=lambda p: p[1], reverse=True)
+            for fx, my in pks[:5]:
+                axf.annotate(f"{fx:.0f} Hz", xy=(fx, my),
+                             xytext=(fx + fs*0.012, my*0.96),
+                             fontsize=8, color=ORANGE,
+                             arrowprops=dict(arrowstyle="->", color=ORANGE, lw=0.7))
+        axf.set_title("Frequency Domain", color=TEXT, fontweight="bold", fontsize=11)
+        axf.set_xlabel("Frequency (Hz)"); axf.set_ylabel(yl)
+        axf.legend(facecolor=PLOT_BG, edgecolor=GRID, labelcolor=TEXT, fontsize=8)
+        self.f_fig.tight_layout(pad=1.4); self.f_canvas.draw()
+
+    def _fft_toggle_pause(self):
+        if self._fft_timer.isActive():
+            self._fft_timer.stop(); self._fft_anim_paused = True
+            self.f_pause.setText("▶  Play")
+        elif self._fft_anim_paused:
+            self._fft_timer.start(8); self._fft_anim_paused = False
+            self.f_pause.setText("⏸  Pause")
+        else:
+            self._compute_fft()
+
