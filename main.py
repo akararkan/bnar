@@ -280,17 +280,24 @@ class FormulaWidget(FigureCanvas):
         for i in range(1, min(nshow + 1, len(an) + 1)):
             a, b = an[i - 1], bn[i - 1]
             if abs(a) > 1e-5:
-                s = "+" if a > 0 and terms else ""
-                terms.append(fr"{s}\frac{{{abs(a):.3f}\cos\frac{{{i}\pi x}}{{{L:.3g}}}}}{{1}}")
+                s = "+" if a > 0 and terms else ("-" if a < 0 else "")
+                terms.append(
+                    fr"{s}{abs(a):.4f}\cos\!\left(\frac{{{i}\pi x}}{{{L:.3g}}}\right)")
             if abs(b) > 1e-5:
-                s = "+" if b > 0 and terms else ""
-                terms.append(fr"{s}\frac{{{abs(b):.3f}\sin\frac{{{i}\pi x}}{{{L:.3g}}}}}{{1}}")
-        tex = r"$" + r"\;".join(terms[:8]) + r"\;\cdots$" if terms else r"$f(x)=0$"
+                s = "+" if b > 0 and terms else ("-" if b < 0 else "")
+                terms.append(
+                    fr"{s}{abs(b):.4f}\sin\!\left(\frac{{{i}\pi x}}{{{L:.3g}}}\right)")
+        if terms:
+            tex = r"$f(x)\approx " + r"\;".join(terms[:6]) + r"\;\cdots$"
+        else:
+            tex = r"$f(x)=0$"
         try:
-            self.ax.text(0.50, 0.50, tex, fontsize=13, color=TEXT, va="center", ha="center")
+            self.ax.text(0.50, 0.50, tex, fontsize=12, color=TEXT,
+                         va="center", ha="center")
         except Exception:
             self.ax.text(0.50, 0.50, " ".join(terms[:6]),
-                         fontsize=10, color=TEXT, va="center", ha="center", family="monospace")
+                         fontsize=10, color=TEXT, va="center", ha="center",
+                         family="monospace")
         self.draw()
 
 
@@ -533,6 +540,8 @@ class FourierLab(QMainWindow):
         self.s_n.setText(str(n))
         self._draw_frame(key, T, n)
         self.series_w.show_series(self._a0, self._an, self._bn, L, min(n, 5))
+        # explicitly update the Compute result for this n
+        self._eval_x0()
 
     def _toggle_pause(self):
         if self._anim_timer.isActive():
