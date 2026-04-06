@@ -1,97 +1,32 @@
-name: Build Executables
+name: Build Windows EXE
 
 on:
   push:
     branches: [ main ]
 
-# ─────────────────────────────────────────────────────────────
-#  JOB 1 — Windows  →  FourierLab.exe  (double-click ready)
-# ─────────────────────────────────────────────────────────────
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
           pip install pyinstaller
           pip install -r requirements.txt
 
-      - name: Build Windows EXE
-        run: >
-          pyinstaller
-          --onefile
-          --windowed
-          --name FourierLab
-          --hidden-import PySide6.QtCore
-          --hidden-import PySide6.QtGui
-          --hidden-import PySide6.QtWidgets
-          --hidden-import matplotlib.backends.backend_qtagg
-          --hidden-import matplotlib.backends.backend_qt
-          --collect-all PySide6
-          --collect-all matplotlib
-          --collect-all numpy
-          main.py
+      - name: Build EXE
+        run: pyinstaller -F -w main.py --collect-all PySide6 --collect-all matplotlib
 
-      - name: Upload Windows EXE
+      - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
-          name: FourierLab-Windows-EXE
-          path: dist/FourierLab.exe
-          retention-days: 30
-
-# ─────────────────────────────────────────────────────────────
-#  JOB 2 — macOS  →  FourierLab  (double-click .app bundle)
-# ─────────────────────────────────────────────────────────────
-  build-macos:
-    runs-on: macos-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install pyinstaller
-          pip install -r requirements.txt
-
-      - name: Build macOS App
-        run: >
-          pyinstaller
-          --onefile
-          --windowed
-          --name FourierLab
-          --hidden-import PySide6.QtCore
-          --hidden-import PySide6.QtGui
-          --hidden-import PySide6.QtWidgets
-          --hidden-import matplotlib.backends.backend_qtagg
-          --hidden-import matplotlib.backends.backend_qt
-          --collect-all PySide6
-          --collect-all matplotlib
-          --collect-all numpy
-          main.py
-
-      - name: Zip macOS app
-        run: cd dist && zip -r FourierLab-macOS.zip FourierLab
-
-      - name: Upload macOS App
-        uses: actions/upload-artifact@v4
-        with:
-          name: FourierLab-macOS-App
-          path: dist/FourierLab-macOS.zip
-          retention-days: 30
+          name: windows-exe
+          path: dist/*.exe
