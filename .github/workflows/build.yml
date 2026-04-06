@@ -9,20 +9,21 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           pip install pyinstaller
           pip install -r requirements.txt
 
       - name: Build EXE
-        run: pyinstaller -F -w main.py --collect-all PySide6
+        run: pyinstaller -F -w main.py --collect-all PySide6 --collect-all matplotlib
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
