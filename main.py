@@ -2,8 +2,7 @@
 FourierLab — Educational Fourier Analysis & FFT Visualization
 =============================================================
 Course: Engineering Analysis 2025-2026
-University: Erbil Polytechnic University
-Instructor: Dr. Ismael Abdulrahman
+Developer: Bnar Haje
 
 PySide6 — Dark Theme · Colored Graphs · Step-by-Step Animation
 Every series plot animates from n = 1 → target n, one harmonic at a time.
@@ -294,7 +293,7 @@ class FourierLab(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Fourier Expansion by Dr. Ismael Abdulrahman")
+        self.setWindowTitle("Fourier Expansion by Bnar Haje")
         self.resize(1340, 860); self.setMinimumSize(QSize(1060, 680))
         self.setStyleSheet(SS)
 
@@ -346,8 +345,9 @@ class FourierLab(QMainWindow):
             b.clicked.connect(lambda _, k=key, idx=i: self._go(k, idx))
             sl.addWidget(b); self.nav[key] = b
         sl.addStretch()
-        sl.addWidget(QLabel("Erbil Polytechnic University"))
-        v = QLabel("v1.0"); v.setStyleSheet(f"color:{MUTED};font-size:10px;"); sl.addWidget(v)
+        by = QLabel("by Bnar Haje")
+        by.setStyleSheet(f"color:{TEXT2};font-size:11px;padding:2px;")
+        sl.addWidget(by)
         root.addWidget(sb)
 
     def _go(self, k, i):
@@ -411,7 +411,8 @@ class FourierLab(QMainWindow):
         r4 = QHBoxLayout(); r4.setSpacing(6)
         self.s_pause = QPushButton("Pause")
         self.s_pause.clicked.connect(self._toggle_pause); r4.addWidget(self.s_pause)
-        self.s_save = QPushButton("Save"); r4.addWidget(self.s_save)
+        self.s_save = QPushButton("Save")
+        self.s_save.clicked.connect(self._save_figure); r4.addWidget(self.s_save)
         self.s_comp = QPushButton("Compute")
         self.s_comp.clicked.connect(self._eval_x0); r4.addWidget(self.s_comp)
         r4.addWidget(_l("x")); self.s_x0 = _e("1", 42); r4.addWidget(self.s_x0)
@@ -419,6 +420,14 @@ class FourierLab(QMainWindow):
         self.s_result = QLineEdit(); self.s_result.setReadOnly(True); self.s_result.setFixedWidth(170)
         r4.addWidget(self.s_result)
         r4.addStretch(); cl.addLayout(r4)
+
+        # auto-update result whenever n or x changes
+        self.s_n.textChanged.connect(self._eval_x0)
+        self.s_x0.textChanged.connect(self._eval_x0)
+        # pressing Enter in the n-field restarts the animation with the new n
+        self.s_n.returnPressed.connect(self._start_animation)
+        # editing n then clicking away redraws at that n immediately
+        self.s_n.editingFinished.connect(self._draw_at_current_n)
 
         # Row 5:  Spectrum buttons + Waveform combo
         r5 = QHBoxLayout(); r5.setSpacing(6)
@@ -600,6 +609,31 @@ class FourierLab(QMainWindow):
             self.s_result.setText(f"{v:.6f}")
         except Exception as e:
             self.s_result.setText(f"Err: {e}")
+
+    def _save_figure(self):
+        """Save the current Fourier Series plot to a PNG file."""
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Plot", "fourier_series.png",
+            "PNG Image (*.png);;PDF File (*.pdf);;SVG File (*.svg)"
+        )
+        if path:
+            self.s_fig.savefig(path, dpi=150, bbox_inches="tight",
+                               facecolor=PLOT_BG)
+
+    def _draw_at_current_n(self):
+        """Immediately draw the plot at the current n (no animation) when
+        the user edits the n field without pressing Play."""
+        if self._anim_timer.isActive():
+            return   # let the running animation handle drawing
+        try:
+            key, T = self._ensure_coeffs()
+            n = self._target_n()
+            self._draw_frame(key, T, n)
+            L = T / 2
+            self.series_w.show_series(self._a0, self._an, self._bn, L, min(n, 5))
+        except Exception:
+            pass
 
     def _jump_sp(self, mode):
         self._stop_animation()
