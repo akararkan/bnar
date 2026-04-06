@@ -389,7 +389,8 @@ class FourierLab(QMainWindow):
         # ── DUAL-PANEL PLOT ──────────────────────────────────────────────
         pf = QFrame(); pf.setObjectName("plot_frame")
         pfl = QVBoxLayout(pf); pfl.setContentsMargins(2, 2, 2, 2)
-        self.s_fig = Figure(figsize=(9, 5), dpi=100, facecolor=PLOT_BG)
+        self.s_fig = Figure(figsize=(9, 5), dpi=100, facecolor=PLOT_BG,
+                            constrained_layout=True)
         gs = GridSpec(3, 1, figure=self.s_fig, hspace=0.55)
         self.s_ax  = self.s_fig.add_subplot(gs[:2, 0])   # reconstruction (top 2/3)
         self.s_ax2 = self.s_fig.add_subplot(gs[2, 0])    # nth harmonic  (bottom 1/3)
@@ -604,7 +605,7 @@ class FourierLab(QMainWindow):
         ax2.legend(facecolor=PLOT_BG, edgecolor=GRID, labelcolor=TEXT,
                    fontsize=8, loc="upper right")
 
-        self.s_fig.tight_layout(pad=0.6)
+        self.s_fig.canvas.draw_idle()
         self.s_canvas.draw()
 
     # ─── other series helpers ─────────────────────────────────────────────
@@ -1031,4 +1032,26 @@ class FourierLab(QMainWindow):
             self.f_pause.setText("⏸  Pause")
         else:
             self._compute_fft()
+
+
+# ═══════════════════════════════════════════════════════
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    p = QPalette()
+    p.setColor(QPalette.Window,          QColor(BG))
+    p.setColor(QPalette.WindowText,      QColor(TEXT))
+    p.setColor(QPalette.Base,            QColor(BG_INPUT))
+    p.setColor(QPalette.AlternateBase,   QColor(BG_CARD))
+    p.setColor(QPalette.ToolTipBase,     QColor(BG_CARD))
+    p.setColor(QPalette.ToolTipText,     QColor(TEXT))
+    p.setColor(QPalette.Text,            QColor(TEXT))
+    p.setColor(QPalette.Button,          QColor(BG_BTN))
+    p.setColor(QPalette.ButtonText,      QColor(TEXT))
+    p.setColor(QPalette.Highlight,       QColor(ACCENT))
+    p.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+    app.setPalette(p)
+    win = FourierLab(); win.show()
+    sys.exit(app.exec())
+
 
