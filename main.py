@@ -421,13 +421,36 @@ class FourierLab(QMainWindow):
         r4.addWidget(self.s_result)
         r4.addStretch(); cl.addLayout(r4)
 
-        # auto-update result whenever n or x changes
+        # ── auto-update result whenever n or x changes ──────────────────
         self.s_n.textChanged.connect(self._eval_x0)
         self.s_x0.textChanged.connect(self._eval_x0)
-        # pressing Enter in the n-field restarts the animation with the new n
+
+        # ── pressing Enter in n field restarts animation ─────────────────
         self.s_n.returnPressed.connect(self._start_animation)
-        # editing n then clicking away redraws at that n immediately
+
+        # ── editing n then clicking away redraws immediately ─────────────
         self.s_n.editingFinished.connect(self._draw_at_current_n)
+
+        # ── Plot f / Grid checkboxes → immediate redraw ──────────────────
+        self.s_plotf.stateChanged.connect(self._draw_at_current_n)
+        self.s_grid.stateChanged.connect(self._draw_at_current_n)
+
+        # ── Xmin / Xmax / Ymin / Ymax fields → redraw on edit ────────────
+        self.s_xmin.editingFinished.connect(self._draw_at_current_n)
+        self.s_xmax.editingFinished.connect(self._draw_at_current_n)
+        self.s_ymin.editingFinished.connect(self._draw_at_current_n)
+        self.s_ymax.editingFinished.connect(self._draw_at_current_n)
+        self.s_xmin.returnPressed.connect(self._draw_at_current_n)
+        self.s_xmax.returnPressed.connect(self._draw_at_current_n)
+        self.s_ymin.returnPressed.connect(self._draw_at_current_n)
+        self.s_ymax.returnPressed.connect(self._draw_at_current_n)
+
+        # ── T field → recompute coefficients + restart animation ─────────
+        self.s_T.editingFinished.connect(self._on_T_changed)
+        self.s_T.returnPressed.connect(self._on_T_changed)
+
+        # ── Speed spinbox → update timer interval live ───────────────────
+        self.s_speed.valueChanged.connect(self._on_speed_changed)
 
         # Row 5:  Spectrum buttons + Waveform combo
         r5 = QHBoxLayout(); r5.setSpacing(6)
@@ -634,6 +657,17 @@ class FourierLab(QMainWindow):
             self.series_w.show_series(self._a0, self._an, self._bn, L, min(n, 5))
         except Exception:
             pass
+
+    def _on_T_changed(self):
+        """T was edited — invalidate the coefficient cache and restart."""
+        self._cache_key = None          # force recompute
+        self._start_animation()
+
+    def _on_speed_changed(self, val):
+        """Speed spinbox changed — update the running timer interval live."""
+        if self._anim_timer.isActive():
+            ms = max(40, int(1000 * val))
+            self._anim_timer.setInterval(ms)
 
     def _jump_sp(self, mode):
         self._stop_animation()
