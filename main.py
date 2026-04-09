@@ -318,7 +318,7 @@ class FormulaWidget(FigureCanvas):
         # ── fallback: decimal ────────────────────────────────
         return f"{sign}{av:.4f}"
 
-    def show_series(self, a0, an, bn, L, nshow=4):
+    def show_series(self, a0, an, bn, L, nshow=4, highlight_n=None):
         self._reset()
         terms = []
 
@@ -334,13 +334,24 @@ class FormulaWidget(FigureCanvas):
 
             if abs(a) > 1e-5:
                 c = self._coeff_latex(a)
-                plus = "+" if (not c.startswith("-")) and terms else ""
-                terms.append(fr"{plus}{c}\cos\!\left({arg}\right)")
+                if c is None:
+                    c = f"{a:.4f}"
+                plus = "+" if (not str(c).startswith("-")) and terms else ""
+                # emphasize the currently added harmonic if requested
+                if highlight_n is not None and i == highlight_n:
+                    terms.append(fr"{plus}\mathbf{{{c}}}\cos\!\left({arg}\right)")
+                else:
+                    terms.append(fr"{plus}{c}\cos\!\left({arg}\right)")
 
             if abs(b) > 1e-5:
                 c = self._coeff_latex(b)
-                plus = "+" if (not c.startswith("-")) and terms else ""
-                terms.append(fr"{plus}{c}\sin\!\left({arg}\right)")
+                if c is None:
+                    c = f"{b:.4f}"
+                plus = "+" if (not str(c).startswith("-")) and terms else ""
+                if highlight_n is not None and i == highlight_n:
+                    terms.append(fr"{plus}\mathbf{{{c}}}\sin\!\left({arg}\right)")
+                else:
+                    terms.append(fr"{plus}{c}\sin\!\left({arg}\right)")
 
         if terms:
             body = r"\;".join(terms[:6])
@@ -509,8 +520,11 @@ class FourierLab(QMainWindow):
         r4.addStretch(); cl.addLayout(r4)
 
         # signal connections
+        # update numeric result and redraw plots live when n or T change
         self.s_n.textChanged.connect(self._eval_x0)
+        self.s_n.textChanged.connect(self._draw_at_current_n)
         self.s_x0.textChanged.connect(self._eval_x0)
+        self.s_T.textChanged.connect(self._draw_at_current_n)
         self.s_n.returnPressed.connect(self._start_animation)
         self.s_n.editingFinished.connect(self._draw_at_current_n)
         self.s_plotf.stateChanged.connect(self._draw_at_current_n)
@@ -555,8 +569,9 @@ class FourierLab(QMainWindow):
 
     # ─── series helpers ──────────────────────────────────────────────────
     def _on_wave(self, i):
+        # when waveform changes, update default T and redraw the current frame
         self.s_T.setText(str(WAVEFORMS[i]["T"]))
-        self._start_animation()
+        QTimer.singleShot(50, self._draw_at_current_n)
 
     def _fval(self, le, default):
         try: return float(le.text())
@@ -596,7 +611,8 @@ class FourierLab(QMainWindow):
         T   = self._fval(self.s_T, 4.0); L = T / 2
         self.s_n.setText(str(n))
         self._draw_frame(key, T, n)
-        self.series_w.show_series(self._a0, self._an, self._bn, L, min(n, 5))
+        # show more terms as n grows and highlight the current harmonic
+        self.series_w.show_series(self._a0, self._an, self._bn, L, nshow=min(n, 10), highlight_n=n)
         # explicitly update the Compute result for this n
         self._eval_x0()
 
@@ -671,15 +687,19 @@ class FourierLab(QMainWindow):
                 # formula with ACTUAL numbers filled in
                 # e.g.  0.4244·cos(3·π·x / 2) + 0.0000·sin(3·π·x / 2)
                 parts = []
+                arg = fr"\frac{{{n}\pi x}}{{{L:.3g}}}"
+                # build LaTeX-friendly coefficient strings
                 if abs(a_n) > 1e-6:
-                    parts.append(f"{a_n:.4f}·cos({n}·π·x/{L:.3g})")
+                    ca = FormulaWidget._coeff_latex(a_n) or f"{a_n:.4f}"
+                    parts.append(fr"{ca}\cos\left({arg}\right)")
                 if abs(b_n) > 1e-6:
-                    sign = "+" if b_n > 0 and parts else ""
-                    parts.append(f"{sign}{b_n:.4f}·sin({n}·π·x/{L:.3g})")
-                formula_str = "  ".join(parts) if parts else "0"
+                    cb = FormulaWidget._coeff_latex(b_n) or f"{b_n:.4f}"
+                    parts.append(fr"{cb}\sin\left({arg}\right)")
+                formula_math = r" + ".join(parts) if parts else "0"
 
+                # legend label uses mathtext so fractions like \pi render correctly
                 ax2.plot(x, nth, color=col, lw=2.4,
-                         label=f"h{n}(x) = {formula_str}")
+                         label=fr"$h_{{{n}}}(x) = {formula_math}$")
                 ax2.fill_between(x, nth, alpha=0.15, color=col)
 
                 # dotted lines showing the TRUE amplitude level
