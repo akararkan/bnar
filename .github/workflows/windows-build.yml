@@ -1,0 +1,33 @@
+name: Build Windows executable
+
+on:
+  push:
+    branches: [ main, fix/** ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: Build with PyInstaller (one-dir, no UPX)
+        run: |
+          pyinstaller --noconfirm --clean --noupx --windowed --onedir --name FourierLab main.py
+      - name: Zip dist folder
+        run: |
+          Compress-Archive -Path dist\FourierLab\* -DestinationPath FourierLab-windows.zip -Force
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FourierLab-windows
+          path: FourierLab-windows.zip
+
