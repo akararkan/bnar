@@ -3,23 +3,32 @@ FourierLab
 
 Educational Fourier series & FFT visualization (PySide6 + Matplotlib + NumPy).
 
-Quick run (macOS/Linux):
+Windows standalone executable (local build and CI)
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python main.py
-```
+This repository focuses on Windows distribution. There are two ways to obtain a Windows runnable bundle:
 
-Windows standalone executable (CI):
+- CI build (recommended): a GitHub Actions workflow is included at `.github/workflows/windows-build.yml`. It runs on a Windows runner, builds a PyInstaller "one-dir" bundle (no UPX) and uploads a ZIP artifact named `FourierLab-windows.zip`.
 
-This repo contains a GitHub Actions workflow (.github/workflows/windows-build.yml) that will build a Windows "one-dir" bundle using PyInstaller and upload a ZIP artifact named `FourierLab-windows.zip`.
+  How to run the workflow:
+  1. Push changes to a branch that matches `fix/**` or to `main`. (The workflow triggers on pushes to `main` and `fix/**`.)
+  2. Open the Actions tab in GitHub, choose the "Build Windows executable" workflow and wait for the run to complete.
+  3. Download the `FourierLab-windows.zip` artifact from the run; it contains `dist\FourierLab\FourierLab.exe` and supporting files. Double-click `FourierLab.exe` on a Windows 10/11 machine to run.
+
+- Local Windows build (if you prefer to build locally):
+
+  ```powershell
+  python -m venv .venv
+  .\.venv\Scripts\activate
+  pip install --upgrade pip
+  pip install -r requirements.txt pyinstaller
+  pyinstaller --noconfirm --clean --noupx --windowed --onedir --name FourierLab main.py
+  # The built app will be under dist\FourierLab\FourierLab.exe
+  ```
 
 Notes on Windows Defender / AV false positives:
-- Building with `--onedir` and `--noupx` reduces the chance of false positives. Avoid `--onefile` and UPX until you have signed the binary.
-- To further reduce warnings: embed version info, avoid UPX, and sign the binary with an Authenticode certificate.
-- If an AV product flags the binary, submit it to the vendor (e.g., Microsoft) as a false positive.
+- Use `--onedir` and `--noupx` (the workflow already does this). These options reduce the chance of AV heuristics triggering compared with `--onefile` and UPX packing.
+- Embed version info and file metadata and, if possible, code-sign the executable and any installer with an Authenticode certificate — code signing is the most effective way to avoid warnings.
+- If an AV product flags the binary, submit it to the vendor (for example, Microsoft Defender portal) as a false-positive.
 
-If you want me to create a signed installer or produce a code-signed .exe, provide a Windows signing certificate (or let me create a CI job that will sign using your secure secrets).
+If you want me to add code-signing steps to the CI (using your certificate stored in GitHub Secrets) or to create a single-file installer (Inno Setup / NSIS), tell me and I'll add a workflow for that.
 
